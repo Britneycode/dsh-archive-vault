@@ -1,5 +1,5 @@
 /**
- * @dsh-external/dsh-archive-vault 设置页面板：归档对话。
+ * dsh-archive-vault 设置页面板：归档对话。
  *
  * 同源 API（/archive-vault/api）提供列表与恢复动作；React 组件只负责
  * 面板挂载，界面使用原生 DOM（与更新中心面板同一模式，避免把宿主的
@@ -313,5 +313,5 @@ export function apply(ctx: ClientContext): void {
       order: 61,
       label: () => '归档对话',
     }, ArchiveVaultPanel),
-  ), '@dsh-external/dsh-archive-vault: panel')
+  ), 'dsh-archive-vault: panel')
 }

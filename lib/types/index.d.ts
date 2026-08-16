@@ -1,5 +1,5 @@
 /**
- * @dsh-external/dsh-archive-vault — 归档对话（查看 / 恢复）。
+ * dsh-archive-vault — 归档对话（查看 / 恢复）。
  *
  * dsh 宿主只有 workspace.archiveSession（把会话从所有分组界面隐藏），
  * 没有查看或恢复归档会话的入口。本插件补齐：
@@ -20,7 +20,7 @@
  * 形状变更时显式报错而不是静默写坏状态。
  */
 import type { Context } from 'cordis';
-export declare const name = "@dsh-external/dsh-archive-vault";
+export declare const name = "dsh-archive-vault";
 export declare const inject: string[];
 export interface Config {
     /** 预览文本最大字符数。 */

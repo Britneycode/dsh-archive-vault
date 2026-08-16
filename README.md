@@ -43,6 +43,18 @@ TS private、运行时可访问）：
 无需重启）；projection cache 行与日志身份绑定，过期行自动作废，无需清理。
 删除不要求会话仍在归档集合（幂等）：中途失败后重试不会卡在半完成状态。
 
+## 安装
+
+```bash
+# npm（已发布）
+pnpm add dsh-archive-vault
+
+# 或直接从 GitHub（免构建，lib 随仓库分发）
+pnpm add github:Britneycode/dsh-archive-vault
+```
+
+然后把包名 `dsh-archive-vault` 加进 dsh profile 的 `dsh.profile.bundles` 列表并重启 dsh web，设置页会出现「归档对话」面板。
+
 ## 开发
 
 ```bash

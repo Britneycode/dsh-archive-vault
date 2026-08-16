@@ -1,4 +1,4 @@
 # dsh-archive-vault bundle patch: mounts the host plugin into a profile.
 - insert:
     - id: archive-vault
-      name: '@dsh-external/dsh-archive-vault'
+      name: 'dsh-archive-vault'

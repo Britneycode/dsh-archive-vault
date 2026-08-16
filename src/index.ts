@@ -1,5 +1,5 @@
 /**
- * @dsh-external/dsh-archive-vault — 归档对话（查看 / 恢复）。
+ * dsh-archive-vault — 归档对话（查看 / 恢复）。
  *
  * dsh 宿主只有 workspace.archiveSession（把会话从所有分组界面隐藏），
  * 没有查看或恢复归档会话的入口。本插件补齐：
@@ -26,7 +26,7 @@ import { rm } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import z from 'schemastery'
 
-export const name = '@dsh-external/dsh-archive-vault'
+export const name = 'dsh-archive-vault'
 export const inject = ['workspaceRegistry', 'sessionPersistence', 'webServer', 'tools']
 
 export interface Config {
@@ -338,7 +338,7 @@ export function apply(ctx: AppContext, config: Config): void {
         return send(200, { ok: false, error: String(error instanceof Error ? error.message : error) })
       }
     },
-  }), '@dsh-external/dsh-archive-vault: api')
+  }), 'dsh-archive-vault: api')
 
   // ── 工具：让 agent 在会话里直接查看 / 恢复归档对话 ──
   ctx.effect(() => ctx.tools.register(defineTool({
@@ -363,7 +363,7 @@ export function apply(ctx: AppContext, config: Config): void {
         preview: row.blank ? '(空白会话)' : row.preview || '(预览不可用)',
       })), null, 2)
     },
-  })), '@dsh-external/dsh-archive-vault: list tool')
+  })), 'dsh-archive-vault: list tool')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'unarchive_session',
@@ -387,7 +387,7 @@ export function apply(ctx: AppContext, config: Config): void {
       const archived = await unarchiveSession(ctx.workspaceRegistry, sessionId)
       return `已恢复会话 ${sessionId}；当前剩余归档会话 ${archived.length} 个。`
     },
-  })), '@dsh-external/dsh-archive-vault: unarchive tool')
+  })), 'dsh-archive-vault: unarchive tool')
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'delete_archived_session',
@@ -419,7 +419,7 @@ export function apply(ctx: AppContext, config: Config): void {
         ? `已永久删除会话 ${sessionId}（日志目录 ${result.artifactPath}）。`
         : `已清理会话 ${sessionId} 的归档与记账引用；其日志文件本就不存在。`
     },
-  })), '@dsh-external/dsh-archive-vault: delete tool')
+  })), 'dsh-archive-vault: delete tool')
 
   logger?.info?.('[%s] 归档对话插件启动', name)
 }
