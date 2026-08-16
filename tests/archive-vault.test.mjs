@@ -11,6 +11,7 @@ import {
   deleteArchivedSession,
   apply,
 } from '../lib/index.js'
+import * as archiveVault from '../lib/index.js'
 
 function userEvent(text, time = 1_000, kind = 'user') {
   return {
@@ -83,6 +84,167 @@ function fakePersistence({ headers = [], inspections = new Map(), locateBase = '
     }),
   }
 }
+
+test('删除成功后移除面板行并刷新宿主会话清单', async () => {
+  const calls = []
+  const refreshError = await archiveVault.reconcileDeletedSession('session-a', {
+    removeRow: sessionId => calls.push(`remove:${sessionId}`),
+    refreshSessions: async () => { calls.push('refresh') },
+  })
+
+  assert.equal(refreshError, null)
+  assert.deepEqual(calls, ['remove:session-a', 'refresh'])
+})
+
+test('删除后的会话清单刷新失败不会被误报为删除失败', async () => {
+  const reason = new Error('offline')
+  const refreshError = await archiveVault.reconcileDeletedSession('session-a', {
+    removeRow: () => {},
+    refreshSessions: async () => { throw reason },
+  })
+
+  assert.equal(refreshError, reason)
+})
+
+test('批量清理按钮文案稳定表达候选数、确认与执行状态', () => {
+  assert.equal(archiveVault.cleanupButtonLabel(7, 2, 'idle'), '清理 7 天以上 (2)')
+  assert.equal(archiveVault.cleanupButtonLabel(30, 1, 'armed'), '确认删除 1 个')
+  assert.equal(archiveVault.cleanupButtonLabel(30, 1, 'busy'), '清理中…')
+})
+
+test('批量删除成功后一次移除所有面板行并刷新宿主会话清单', async () => {
+  const calls = []
+  const refreshError = await archiveVault.reconcileDeletedSessions(['session-a', 'session-b'], {
+    removeRows: sessionIds => calls.push(`remove:${sessionIds.join(',')}`),
+    refreshSessions: async () => { calls.push('refresh') },
+  })
+
+  assert.equal(refreshError, null)
+  assert.deepEqual(calls, ['remove:session-a,session-b', 'refresh'])
+})
+
+test('归档计时只记录监听期间新增的归档，旧归档保持未知', () => {
+  const result = archiveVault.reconcileArchiveTimes({
+    previousArchivedIds: ['tracked', 'legacy'],
+    nextArchivedIds: ['tracked', 'legacy', 'new-session'],
+    archivedAt: { tracked: 1_000 },
+    now: 9_000,
+  })
+
+  assert.deepEqual(result, {
+    archivedAt: { tracked: 1_000, 'new-session': 9_000 },
+    changed: true,
+  })
+})
+
+test('取消归档会移除计时，再次归档从新时间开始', () => {
+  const removed = archiveVault.reconcileArchiveTimes({
+    previousArchivedIds: ['session-a'],
+    nextArchivedIds: [],
+    archivedAt: { 'session-a': 1_000 },
+    now: 5_000,
+  })
+  const rearchived = archiveVault.reconcileArchiveTimes({
+    previousArchivedIds: [],
+    nextArchivedIds: ['session-a'],
+    archivedAt: removed.archivedAt,
+    now: 8_000,
+  })
+
+  assert.deepEqual(removed, { archivedAt: {}, changed: true })
+  assert.deepEqual(rearchived, { archivedAt: { 'session-a': 8_000 }, changed: true })
+})
+
+test('清理候选按归档时间筛选且排除未知时间记录', () => {
+  const day = 24 * 60 * 60 * 1_000
+  const now = 40 * day
+  const archivedAt = {
+    recent: now - 6 * day,
+    seven: now - 7 * day,
+    thirty: now - 30 * day,
+  }
+
+  assert.deepEqual(
+    archiveVault.eligibleArchivedSessionIds(['legacy', 'recent', 'seven', 'thirty'], archivedAt, 7, now),
+    ['seven', 'thirty'],
+  )
+  assert.deepEqual(
+    archiveVault.eligibleArchivedSessionIds(['legacy', 'recent', 'seven', 'thirty'], archivedAt, 30, now),
+    ['thirty'],
+  )
+})
+
+test('批量清理继续处理单条失败并返回成功与失败明细', async () => {
+  const attempted = []
+  const result = await archiveVault.cleanupArchivedSessions(['first', 'live', 'last'], async sessionId => {
+    attempted.push(sessionId)
+    if (sessionId === 'live') throw new Error('正在运行')
+  })
+
+  assert.deepEqual(attempted, ['first', 'live', 'last'])
+  assert.deepEqual(result, {
+    deletedSessionIds: ['first', 'last'],
+    failures: [{ sessionId: 'live', error: '正在运行' }],
+  })
+})
+
+test('归档时间跟踪器加载已有记录且不给旧归档补猜测时间', async () => {
+  const writes = []
+  const tracker = new archiveVault.ArchiveTimeTracker({
+    initialArchivedIds: ['tracked', 'legacy'],
+    store: {
+      read: async () => ({ tracked: 1_000 }),
+      write: async archivedAt => { writes.push({ ...archivedAt }) },
+    },
+    now: () => 9_000,
+  })
+
+  assert.deepEqual(await tracker.snapshot(), { tracked: 1_000 })
+  assert.deepEqual(writes, [])
+})
+
+test('归档时间跟踪器串行保存快速连续的归档变化', async () => {
+  const writes = []
+  const times = [1_000, 2_000]
+  const tracker = new archiveVault.ArchiveTimeTracker({
+    initialArchivedIds: [],
+    store: {
+      read: async () => ({}),
+      write: async archivedAt => { writes.push({ ...archivedAt }) },
+    },
+    now: () => times.shift(),
+  })
+
+  const first = tracker.observe(['session-a'])
+  const second = tracker.observe(['session-a', 'session-b'])
+  await Promise.all([first, second])
+
+  assert.deepEqual(await tracker.snapshot(), { 'session-a': 1_000, 'session-b': 2_000 })
+  assert.deepEqual(writes, [
+    { 'session-a': 1_000 },
+    { 'session-a': 1_000, 'session-b': 2_000 },
+  ])
+})
+
+test('归档时间文件后端持久化版本化状态并拒绝损坏内容', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'archive-vault-times-'))
+  const statePath = join(base, 'archive-times.json')
+  try {
+    const store = new archiveVault.ArchiveTimeFileStore(statePath)
+    assert.deepEqual(await store.read(), {})
+
+    await store.write({ 'session-a': 1_234 })
+    assert.deepEqual(await store.read(), { 'session-a': 1_234 })
+
+    await store.write({ 'session-a': 1_234, 'session-b': 5_678 })
+    assert.deepEqual(await store.read(), { 'session-a': 1_234, 'session-b': 5_678 })
+
+    writeFileSync(statePath, '{"version":2,"archivedAt":{}}')
+    await assert.rejects(store.read(), /version 1/)
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
 
 test('textFromContent 拼接 text 块并忽略其他块', () => {
   assert.equal(textFromContent('plain'), 'plain')
@@ -234,15 +396,29 @@ async function setupApi(archived, options = {}) {
     locateBase: options.locateBase,
   })
   const http = fakeHttp()
+  const archiveTimeTracker = new archiveVault.ArchiveTimeTracker({
+    initialArchivedIds: archived,
+    store: {
+      read: async () => ({ ...(options.archivedAt ?? {}) }),
+      write: async () => {},
+    },
+    now: () => options.now ?? Date.now(),
+  })
   const ctxRoot = {
     effect: fn => fn(),
+    on: () => () => {},
     logger: undefined,
-    get: () => undefined,
+    get: () => options.liveSessionIds === undefined
+      ? undefined
+      : { get: id => options.liveSessionIds.includes(id) ? {} : undefined },
     workspaceRegistry: registry,
     sessionPersistence: persistence,
     ...http,
   }
-  apply(ctxRoot, { previewMaxChars: 160 })
+  apply(ctxRoot, { previewMaxChars: 160 }, {
+    archiveTimeTracker,
+    now: () => options.now ?? Date.now(),
+  })
   const handler = http.routes[0].handler
   return { registry, handler }
 }
@@ -256,6 +432,103 @@ test('HTTP API：GET /list 返回归档清单', async () => {
   assert.equal(payload.ok, true)
   assert.equal(payload.count, 2)
   assert.equal(payload.sessions[0].sessionId, 'session-b')
+  assert.deepEqual(payload.cleanup, {
+    trackedCount: 0,
+    unknownCount: 2,
+    eligible7Days: 0,
+    eligible30Days: 0,
+  })
+})
+
+test('HTTP API：按真实归档时间批量清理 7 天候选', async () => {
+  const day = 24 * 60 * 60 * 1_000
+  const now = 40 * day
+  const base = mkdtempSync(join(tmpdir(), 'archive-vault-cleanup-'))
+  const ids = ['legacy', 'recent', 'seven', 'thirty']
+  try {
+    for (const id of ids) {
+      const sessionDir = join(base, id)
+      mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(join(sessionDir, 'session.jsonl.zstd'), 'x')
+    }
+    const { handler, registry } = await setupApi(ids, {
+      locateBase: base.replaceAll('\\', '/'),
+      now,
+      archivedAt: {
+        recent: now - 6 * day,
+        seven: now - 7 * day,
+        thirty: now - 30 * day,
+      },
+    })
+
+    const listed = fakeRes()
+    await handler(fakeReq('GET', '/archive-vault/api/list'), listed)
+    assert.deepEqual(JSON.parse(listed.body).cleanup, {
+      trackedCount: 3,
+      unknownCount: 1,
+      eligible7Days: 2,
+      eligible30Days: 1,
+    })
+
+    const cleaned = fakeRes()
+    await handler(
+      fakeReq('POST', '/archive-vault/api/cleanup', JSON.stringify({ days: 7 }), {
+        origin: 'http://localhost:3080',
+        host: 'localhost:3080',
+      }),
+      cleaned,
+    )
+    assert.deepEqual(JSON.parse(cleaned.body), {
+      ok: true,
+      days: 7,
+      eligibleCount: 2,
+      deletedCount: 2,
+      deletedSessionIds: ['seven', 'thirty'],
+      failedCount: 0,
+      failures: [],
+    })
+    assert.deepEqual(registry.archivedSessionIds, ['legacy', 'recent'])
+    assert.equal(existsSync(join(base, 'seven')), false)
+    assert.equal(existsSync(join(base, 'thirty')), false)
+    assert.equal(existsSync(join(base, 'legacy')), true)
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('HTTP API：批量清理拒绝 7 和 30 以外的阈值', async () => {
+  const { handler } = await setupApi([])
+  const res = fakeRes()
+  await handler(fakeReq('POST', '/archive-vault/api/cleanup', JSON.stringify({ days: 14 })), res)
+  assert.deepEqual(JSON.parse(res.body), { ok: false, error: 'days must be 7 or 30' })
+})
+
+test('HTTP API：并发批量清理串行重算候选，不重复删除', async () => {
+  const day = 24 * 60 * 60 * 1_000
+  const now = 40 * day
+  const base = mkdtempSync(join(tmpdir(), 'archive-vault-cleanup-race-'))
+  try {
+    const sessionDir = join(base, 'old-session')
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(join(sessionDir, 'session.jsonl.zstd'), 'x')
+    const { handler } = await setupApi(['old-session'], {
+      locateBase: base.replaceAll('\\', '/'),
+      now,
+      archivedAt: { 'old-session': now - 30 * day },
+    })
+    const first = fakeRes()
+    const second = fakeRes()
+    const request = () => fakeReq('POST', '/archive-vault/api/cleanup', JSON.stringify({ days: 7 }))
+
+    await Promise.all([handler(request(), first), handler(request(), second)])
+
+    const results = [JSON.parse(first.body), JSON.parse(second.body)]
+    assert.deepEqual(results.map(result => result.eligibleCount).sort(), [0, 1])
+    assert.equal(results.reduce((sum, result) => sum + result.deletedCount, 0), 1)
+    assert.equal(results.reduce((sum, result) => sum + result.failedCount, 0), 0)
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
 })
 
 test('HTTP API：POST /unarchive 校验同源并恢复', async () => {

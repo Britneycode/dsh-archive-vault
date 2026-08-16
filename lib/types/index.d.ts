@@ -1,11 +1,12 @@
 /**
- * dsh-archive-vault — 归档对话（查看 / 恢复）。
+ * dsh-archive-vault — 归档对话（查看 / 恢复 / 删除 / 按归档时长清理）。
  *
  * dsh 宿主只有 workspace.archiveSession（把会话从所有分组界面隐藏），
  * 没有查看或恢复归档会话的入口。本插件补齐：
  *
  *  1. 设置页面板「归档对话」：列出归档会话（所属工作区、创建时间、
- *     最近一条人类提问预览、cwd），支持按关键词过滤、一键恢复；
+ *     最近一条人类提问预览、cwd），支持过滤、恢复、永久删除，以及按
+ *     实际归档时间清理 7 天或 30 天以上的会话；
  *  2. 恢复 = 从 WorkspaceRegistry 的全局归档集合移除该会话。归档不改
  *     工作区记账（sessionIds 槽位保留），所以恢复后会话自动回到原位置；
  *  3. 恢复走 registry 自己的串行写队列（enqueueOperation + setState，
@@ -13,13 +14,20 @@
  *  4. 写入 domain global 触发 domain/changed → apiproxy 自动向所有已连接
  *     Web 客户端推送 host/archived-sessions-changed，侧栏实时刷新——
  *     插件无需（也不能）自己碰推送通道；
- *  5. 附带 agent 工具 list_archived_sessions / unarchive_session，
- *     会话内也能直接找回归档对话。
+ *  5. 归档时间只从插件启用后发生的新归档开始记录；无法确定归档时间的
+ *     历史会话不参与批量清理，状态读取异常时清理失败关闭；
+ *  6. 附带 agent 工具 list_archived_sessions / unarchive_session /
+ *     delete_archived_session，会话内也能直接找回或删除归档对话。
  *
  * 兼容性守卫：unarchive 依赖 registry 的 TS-private 方法（运行时可访问），
  * 形状变更时显式报错而不是静默写坏状态。
  */
 import type { Context } from 'cordis';
+import { ArchiveTimeTracker } from './archive-cleanup.js';
+export { cleanupButtonLabel, reconcileDeletedSession, reconcileDeletedSessions, } from './client-sync.js';
+export type { CleanupButtonState, DeleteManyReconcileDeps, DeleteReconcileDeps, } from './client-sync.js';
+export { ArchiveTimeFileStore, ArchiveTimeTracker, cleanupArchivedSessions, eligibleArchivedSessionIds, reconcileArchiveTimes, } from './archive-cleanup.js';
+export type { ArchivedAtMap, ArchiveTimeStore, ArchiveTimeTrackerOptions, ArchiveTimeReconcileInput, ArchiveTimeReconcileResult, CleanupFailure, CleanupResult, } from './archive-cleanup.js';
 export declare const name = "dsh-archive-vault";
 export declare const inject: string[];
 export interface Config {
@@ -49,6 +57,11 @@ type AppContext = Context & {
     workspaceRegistry: any;
     sessionPersistence: any;
 };
+/** 可注入运行时依赖（HTTP 集成测试使用内存跟踪器与固定时钟）。 */
+export interface ApplyRuntime {
+    archiveTimeTracker?: ArchiveTimeTracker;
+    now?: () => number;
+}
 /** ContentBlock 文本抽取（仅 type:'text' 可见文本块；reasoning 等其他块忽略）。 */
 export declare function textFromContent(content: unknown): string;
 /**
@@ -103,5 +116,4 @@ export interface DeleteResult {
  * "已恢复但没删掉"的状态。
  */
 export declare function deleteArchivedSession(deps: DeleteDeps, sessionId: string): Promise<DeleteResult>;
-export declare function apply(ctx: AppContext, config: Config): void;
-export {};
+export declare function apply(ctx: AppContext, config: Config, runtime?: ApplyRuntime): void;
