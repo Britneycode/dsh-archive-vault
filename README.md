@@ -45,15 +45,21 @@ TS private、运行时可访问）：
 
 ## 安装
 
-```bash
-# npm（已发布）
-pnpm add dsh-archive-vault
+推荐用 dsh 官方 CLI 安装（自动完成 pnpm 安装与 `dsh.profile.bundles` 对账，无需手改任何配置）：
 
-# 或直接从 GitHub（免构建，lib 随仓库分发）
-pnpm add github:Britneycode/dsh-archive-vault
+```bash
+dsh plugin --profile web add dsh-archive-vault                      # npm 源
+dsh plugin --profile web add github:Britneycode/dsh-archive-vault   # 或 GitHub 源
+dsh plugin --profile web remove dsh-archive-vault                   # 卸载
 ```
 
-然后把包名 `dsh-archive-vault` 加进 dsh profile 的 `dsh.profile.bundles` 列表并重启 dsh web，设置页会出现「归档对话」面板。
+安装后重启 dsh web，设置页会出现「归档对话」面板。注意 `--profile` 要跟在 `plugin` 子命令之后（放在前面会被参数解析器拒绝）。
+
+也可以直接用包管理器安装，此时需手动把 `dsh-archive-vault` 加进 profile `package.json` 的 `dsh.profile.bundles` 列表再重启：
+
+```bash
+pnpm add dsh-archive-vault
+```
 
 ## 开发
 
