@@ -73,10 +73,6 @@ export declare function extractPreview(events: readonly unknown[], maxChars: num
     blank: boolean;
     preview: string;
 };
-/**
- * 构建归档会话列表。只读路径全部走公开 API（archivedSessionIds / list() /
- * sessionPersistence.list() / inspect()）；单个会话 inspect 失败仅降级预览。
- */
 export declare function buildArchiveList(registry: any, persistence: any, previewMaxChars: number): Promise<ArchiveRow[]>;
 /**
  * 恢复一个归档会话：从 registry 全局归档集合移除。幂等（未归档直接

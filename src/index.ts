@@ -157,6 +157,32 @@ export function extractPreview(events: readonly unknown[], maxChars: number): { 
  * 构建归档会话列表。只读路径全部走公开 API（archivedSessionIds / list() /
  * sessionPersistence.list() / inspect()）；单个会话 inspect 失败仅降级预览。
  */
+/** 跨版本读取一个会话的事件流。老后端是 inspect(id) → {events}；
+ *  handle-based seam（0.1.2-alpha.4 起）改为 resolveLog(id) → readStoredLog(path, id) → {events}。
+ *  会话还没有磁盘产物（空白会话惰性落盘）时返回空数组。两者都缺失时抛错。 */
+async function readSessionEventsCompat(persistence: any, sessionId: string): Promise<unknown[]> {
+  if (typeof persistence.inspect === 'function') {
+    const inspection = await persistence.inspect(sessionId)
+    const events = (inspection as Record<string, unknown> | undefined)?.['events']
+    return Array.isArray(events) ? events : []
+  }
+  if (typeof persistence.resolveLog === 'function' && typeof persistence.readStoredLog === 'function') {
+    const path = await persistence.resolveLog(sessionId)
+    if (typeof path !== 'string' || path === '') return []
+    const stored = await persistence.readStoredLog(path, sessionId)
+    const events = (stored as Record<string, unknown> | undefined)?.['events']
+    return Array.isArray(events) ? events : []
+  }
+  throw new Error('持久化后端不提供 inspect / resolveLog+readStoredLog，无法读取会话事件')
+}
+
+/** 预览读取的单文件字节上限：更大的日志跳过预览（全量解析一个大会话要数秒）。 */
+const PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+/** 预览并行读的并发上限。 */
+const PREVIEW_CONCURRENCY = 8
+/** 预览缓存：日志不可变，按 revision（读取失败也记，防大日志反复解析失败）复用结果。 */
+const previewCache = new Map<string, { blank: boolean; preview: string; failed: boolean }>()
+
 export async function buildArchiveList(
   registry: any,
   persistence: any,
@@ -165,12 +191,22 @@ export async function buildArchiveList(
   const archivedIds: readonly unknown[] = registry.archivedSessionIds ?? []
   if (archivedIds.length === 0) return []
 
-  const headers = new Map<string, { createdAt: number; cwd?: string }>()
-  for (const header of await persistence.list()) {
-    const record = header as Record<string, unknown>
+  const headers = new Map<string, { createdAt: number; cwd?: string; sizeBytes: number | null; revision: string | null }>()
+  for (const entry of await persistence.list()) {
+    // handle-based seam（0.1.2-alpha.4 起）把 header 包进快照：{header, revision, sizeBytes}；
+    // 更早版本是扁平 header。两种形状都接受。
+    const snapshot: Record<string, unknown> = entry !== null && typeof entry === 'object' && 'header' in entry
+      ? (entry as Record<string, unknown>)
+      : { header: entry }
+    const record = snapshot['header'] as Record<string, unknown> | null | undefined
+    if (record === null || typeof record !== 'object') continue
     headers.set(String(record['id']), {
       createdAt: typeof record['createdAt'] === 'number' ? record['createdAt'] : 0,
       ...(typeof record['cwd'] === 'string' ? { cwd: record['cwd'] } : {}),
+      sizeBytes: typeof snapshot['sizeBytes'] === 'number' ? snapshot['sizeBytes'] : null,
+      revision: snapshot['revision'] === undefined || snapshot['revision'] === null
+        ? null
+        : String(snapshot['revision']),
     })
   }
 
@@ -193,7 +229,7 @@ export async function buildArchiveList(
     const sessionId = String(rawId)
     const header = headers.get(sessionId)
     const workspace = workspaceOf.get(sessionId)
-    const row: ArchiveRow = {
+    rows.push({
       sessionId,
       createdAt: header?.createdAt ?? 0,
       cwd: header?.cwd ?? null,
@@ -203,18 +239,47 @@ export async function buildArchiveList(
       blank: false,
       preview: '',
       previewAvailable: true,
-    }
-    try {
-      const inspection = await persistence.inspect(sessionId)
-      const events = (inspection as Record<string, unknown>)['events']
-      const folded = extractPreview(Array.isArray(events) ? events : [], previewMaxChars)
-      row.blank = folded.blank
-      row.preview = folded.preview
-    } catch {
-      row.previewAvailable = false
-    }
-    rows.push(row)
+    })
   }
+
+  // 预览并行读：命中缓存（含失败结果）或超过字节上限的行不读盘。
+  const cacheKeyOf = (sessionId: string): string => {
+    const header = headers.get(sessionId)
+    return `${sessionId}\u0000${header === undefined || header.revision === null || header.revision === undefined ? 'none' : header.revision}`
+  }
+  const pending = rows.filter((row) => {
+    const header = headers.get(row.sessionId)
+    if (header?.sizeBytes !== null && header?.sizeBytes !== undefined && header.sizeBytes > PREVIEW_MAX_BYTES) {
+      row.previewAvailable = false
+      return false
+    }
+    const cached = previewCache.get(cacheKeyOf(row.sessionId))
+    if (cached !== undefined) {
+      row.blank = cached.blank
+      row.preview = cached.preview
+      row.previewAvailable = !cached.failed
+      return false
+    }
+    return true
+  })
+  let cursor = 0
+  async function worker(): Promise<void> {
+    while (cursor < pending.length) {
+      const row = pending[cursor++]!
+      const cacheKey = cacheKeyOf(row.sessionId)
+      try {
+        const events = await readSessionEventsCompat(persistence, row.sessionId)
+        const folded = extractPreview(events, previewMaxChars)
+        row.blank = folded.blank
+        row.preview = folded.preview
+      } catch {
+        row.previewAvailable = false
+      }
+      previewCache.set(cacheKey, { blank: row.blank, preview: row.preview, failed: !row.previewAvailable })
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(PREVIEW_CONCURRENCY, pending.length) }, worker))
+
   rows.sort((left, right) => right.createdAt - left.createdAt)
   return rows
 }
@@ -287,8 +352,15 @@ export async function deleteArchivedSession(deps: DeleteDeps, sessionId: string)
     throw new Error(`会话 ${target} 正在运行，请先等它结束（或关闭该会话）再删除。`)
   }
 
-  const headers = await deps.persistence.list()
-  const header = (headers as Array<Record<string, unknown>>).find(candidate => String(candidate['id']) === target)
+  const snapshots = await deps.persistence.list()
+  // handle-based seam（0.1.2-alpha.4 起）list() 返回 {header, revision} 快照；
+  // 更早版本是扁平 header。先解包再找目标，否则 header 恒缺失 → 只清引用
+  // 不删文件，会话在取消归档后立刻"复活"到未分组。
+  const header = (snapshots as Array<Record<string, unknown>>)
+    .map(candidate => (candidate !== null && typeof candidate === 'object' && 'header' in candidate
+      ? candidate['header']
+      : candidate) as Record<string, unknown> | null)
+    .find(record => record !== null && typeof record === 'object' && String(record['id']) === target)
 
   if ((deps.registry.archivedSessionIds as readonly unknown[]).map(String).includes(target)) {
     await unarchiveSession(deps.registry, target)
