@@ -85,42 +85,10 @@ function fakePersistence({ headers = [], inspections = new Map(), locateBase = '
   }
 }
 
-test('删除成功后移除面板行并刷新宿主会话清单', async () => {
-  const calls = []
-  const refreshError = await archiveVault.reconcileDeletedSession('session-a', {
-    removeRow: sessionId => calls.push(`remove:${sessionId}`),
-    refreshSessions: async () => { calls.push('refresh') },
-  })
-
-  assert.equal(refreshError, null)
-  assert.deepEqual(calls, ['remove:session-a', 'refresh'])
-})
-
-test('删除后的会话清单刷新失败不会被误报为删除失败', async () => {
-  const reason = new Error('offline')
-  const refreshError = await archiveVault.reconcileDeletedSession('session-a', {
-    removeRow: () => {},
-    refreshSessions: async () => { throw reason },
-  })
-
-  assert.equal(refreshError, reason)
-})
-
 test('批量清理按钮文案稳定表达候选数、确认与执行状态', () => {
   assert.equal(archiveVault.cleanupButtonLabel(7, 2, 'idle'), '清理 7 天以上 (2)')
   assert.equal(archiveVault.cleanupButtonLabel(30, 1, 'armed'), '确认删除 1 个')
   assert.equal(archiveVault.cleanupButtonLabel(30, 1, 'busy'), '清理中…')
-})
-
-test('批量删除成功后一次移除所有面板行并刷新宿主会话清单', async () => {
-  const calls = []
-  const refreshError = await archiveVault.reconcileDeletedSessions(['session-a', 'session-b'], {
-    removeRows: sessionIds => calls.push(`remove:${sessionIds.join(',')}`),
-    refreshSessions: async () => { calls.push('refresh') },
-  })
-
-  assert.equal(refreshError, null)
-  assert.deepEqual(calls, ['remove:session-a,session-b', 'refresh'])
 })
 
 test('归档计时只记录监听期间新增的归档，旧归档保持未知', () => {
@@ -423,15 +391,14 @@ async function setupApi(archived, options = {}) {
   return { registry, handler }
 }
 
-test('HTTP API：GET /list 返回归档清单', async () => {
+test('HTTP API：GET /summary 返回归档计数与清理候选', async () => {
   const { handler } = await setupApi(['session-a', 'session-b'])
   const res = fakeRes()
-  await handler(fakeReq('GET', '/archive-vault/api/list'), res)
+  await handler(fakeReq('GET', '/archive-vault/api/summary'), res)
   assert.equal(res.code, 200)
   const payload = JSON.parse(res.body)
   assert.equal(payload.ok, true)
   assert.equal(payload.count, 2)
-  assert.equal(payload.sessions[0].sessionId, 'session-b')
   assert.deepEqual(payload.cleanup, {
     trackedCount: 0,
     unknownCount: 2,
@@ -462,7 +429,7 @@ test('HTTP API：按真实归档时间批量清理 7 天候选', async () => {
     })
 
     const listed = fakeRes()
-    await handler(fakeReq('GET', '/archive-vault/api/list'), listed)
+    await handler(fakeReq('GET', '/archive-vault/api/summary'), listed)
     assert.deepEqual(JSON.parse(listed.body).cleanup, {
       trackedCount: 3,
       unknownCount: 1,
@@ -531,36 +498,10 @@ test('HTTP API：并发批量清理串行重算候选，不重复删除', async 
   }
 })
 
-test('HTTP API：POST /unarchive 校验同源并恢复', async () => {
-  const { handler, registry } = await setupApi(['session-a', 'session-b'])
-  const foreign = fakeRes()
-  await handler(
-    fakeReq('POST', '/archive-vault/api/unarchive', JSON.stringify({ sessionId: 'session-a' }), {
-      origin: 'https://evil.example',
-      host: 'localhost:3080',
-    }),
-    foreign,
-  )
-  assert.equal(foreign.code, 403)
-
-  const res = fakeRes()
-  await handler(
-    fakeReq('POST', '/archive-vault/api/unarchive', JSON.stringify({ sessionId: 'session-a' }), {
-      origin: 'http://localhost:3080',
-      host: 'localhost:3080',
-    }),
-    res,
-  )
-  assert.equal(res.code, 200)
-  const payload = JSON.parse(res.body)
-  assert.equal(payload.ok, true)
-  assert.deepEqual(registry.archivedSessionIds, ['session-b'])
-})
-
-test('HTTP API：未知路径 404，缺 sessionId 报错', async () => {
+test('HTTP API：未知路径 404，清理参数校验报错', async () => {
   const { handler } = await setupApi([])
   const missing = fakeRes()
-  await handler(fakeReq('POST', '/archive-vault/api/unarchive', '{}'), missing)
+  await handler(fakeReq('POST', '/archive-vault/api/cleanup', '{}'), missing)
   assert.equal(JSON.parse(missing.body).ok, false)
 
   const unknown = fakeRes()
@@ -653,32 +594,4 @@ test('deleteArchivedSession：目录名不含会话 id 时拒绝删文件', asyn
   // 引用清理已完成，文件未动
   assert.deepEqual(registry.archivedSessionIds, [])
   assert.deepEqual(removed, [])
-})
-
-test('HTTP API：POST /delete 真实删除临时目录', async () => {
-  const base = mkdtempSync(join(tmpdir(), 'archive-vault-'))
-  try {
-    const sessionDir = join(base, 'session-todelete')
-    mkdirSync(sessionDir, { recursive: true })
-    writeFileSync(join(sessionDir, 'session.jsonl.zstd'), 'x')
-    const { handler, registry } = await setupApi(['session-todelete'], {
-      locateBase: base.replaceAll('\\', '/'),
-    })
-    const res = fakeRes()
-    await handler(
-      fakeReq('POST', '/archive-vault/api/delete', JSON.stringify({ sessionId: 'session-todelete' }), {
-        origin: 'http://localhost:3080',
-        host: 'localhost:3080',
-      }),
-      res,
-    )
-    assert.equal(res.code, 200)
-    const payload = JSON.parse(res.body)
-    assert.equal(payload.ok, true)
-    assert.equal(payload.artifactDeleted, true)
-    assert.equal(existsSync(sessionDir), false)
-    assert.deepEqual(registry.archivedSessionIds, [])
-  } finally {
-    rmSync(base, { recursive: true, force: true })
-  }
 })

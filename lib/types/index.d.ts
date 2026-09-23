@@ -1,16 +1,17 @@
 /**
- * dsh-archive-vault — 归档对话（查看 / 恢复 / 删除 / 按归档时长清理）。
+ * dsh-archive-vault — 归档会话的永久删除与按归档时长清理。
  *
- * dsh 宿主只有 workspace.archiveSession（把会话从所有分组界面隐藏），
- * 没有查看或恢复归档会话的入口。本插件补齐：
+ * dsh 内置设置页（Archived sessions）已提供归档会话的浏览、搜索与恢复，
+ * 但宿主明确不提供永久删除（session deletion 被列为 absent capability）。
+ * 本插件只补删除这一环：
  *
- *  1. 设置页面板「归档对话」：列出归档会话（所属工作区、创建时间、
- *     最近一条人类提问预览、cwd），支持过滤、恢复、永久删除，以及按
- *     实际归档时间清理 7 天或 30 天以上的会话；
- *  2. 恢复 = 从 WorkspaceRegistry 的全局归档集合移除该会话。归档不改
- *     工作区记账（sessionIds 槽位保留），所以恢复后会话自动回到原位置；
- *  3. 恢复走 registry 自己的串行写队列（enqueueOperation + setState，
- *     与 create/delete/reorder/archive 完全互斥，不丢并发写）；
+ *  1. 设置页面板「归档清理」：显示归档数量与归档时间跟踪状态，按实际
+ *     归档时间批量清理 7 天或 30 天以上的会话；
+ *  2. 永久删除 = 从全局归档集合移除 + 从工作区记账 detach + 删除磁盘
+ *     会话日志，失败模式偏向"会话重新可见"而不是"无日志的隐身残骸"；
+ *  3. 取消归档走 registry 自己的串行写队列（enqueueOperation + setState，
+ *     与 create/delete/reorder/archive 完全互斥，不丢并发写）——删除的
+ *     第一步与 unarchive_session 工具共用此路径；
  *  4. 写入 domain global 触发 domain/changed → apiproxy 自动向所有已连接
  *     Web 客户端推送 host/archived-sessions-changed，侧栏实时刷新——
  *     插件无需（也不能）自己碰推送通道；
@@ -24,8 +25,8 @@
  */
 import type { Context } from 'cordis';
 import { ArchiveTimeTracker } from './archive-cleanup.js';
-export { cleanupButtonLabel, reconcileDeletedSession, reconcileDeletedSessions, } from './client-sync.js';
-export type { CleanupButtonState, DeleteManyReconcileDeps, DeleteReconcileDeps, } from './client-sync.js';
+export { cleanupButtonLabel } from './client-sync.js';
+export type { CleanupButtonState } from './client-sync.js';
 export { ArchiveTimeFileStore, ArchiveTimeTracker, cleanupArchivedSessions, eligibleArchivedSessionIds, reconcileArchiveTimes, } from './archive-cleanup.js';
 export type { ArchivedAtMap, ArchiveTimeStore, ArchiveTimeTrackerOptions, ArchiveTimeReconcileInput, ArchiveTimeReconcileResult, CleanupFailure, CleanupResult, } from './archive-cleanup.js';
 export declare const name = "dsh-archive-vault";

@@ -1,18 +1,17 @@
 /**
- * dsh-archive-vault 设置页面板：归档对话。
+ * dsh-archive-vault 设置页面板：归档清理。
  *
- * 同源 API（/archive-vault/api）提供列表、恢复、删除和按归档时长清理；
+ * 浏览、搜索与恢复归档会话由 dsh 内置设置页（Archived sessions）承担；
+ * 本面板只做宿主明确不提供的永久删除：按实际归档时长批量清理（同源
+ * API /archive-vault/api 的 summary + cleanup）。要永久删除单个会话，
+ * 可让 agent 调用 delete_archived_session 工具。
  * React 组件只负责面板挂载，界面使用原生 DOM（与更新中心面板同一模式，
  * 避免把宿主的 React 运行时打进插件 bundle）。
  */
 import { createElement, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { SlotsService } from '@deepseek-ai/dsh-client-ui-slots'
-import {
-  cleanupButtonLabel,
-  reconcileDeletedSession,
-  reconcileDeletedSessions,
-} from '../client-sync.js'
+import { cleanupButtonLabel } from '../client-sync.js'
 
 type ClientContext = {
   slots: SlotsService
@@ -44,19 +43,7 @@ const styles = `
 .av-btn.danger.armed{background:#d23a3a;border-color:#d23a3a;color:#fff}
 .av-btn.cleanup{min-width:148px}
 .av-btn:disabled{opacity:.45;cursor:not-allowed}
-.av-filter{display:flex;gap:8px;align-items:center;padding:14px 0 4px}
-.av-input{flex:1 1 200px;min-width:160px;min-height:32px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;padding:6px 10px}
-.av-list{list-style:none;margin:0;padding:0}
-.av-item{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:16px;align-items:center;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2)}
-.av-item>*{min-width:0}
-.av-item:first-child{border-top:0}
-.av-preview{font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.av-preview.muted{color:var(--dsw-alias-label-tertiary);font-weight:400}
-.av-meta{display:flex;gap:6px;align-items:center;color:var(--dsw-alias-label-tertiary);font-size:11px;margin-top:3px;flex-wrap:wrap;min-width:0}
-.av-tag{display:inline-flex;align-items:center;min-height:20px;border-radius:4px;padding:1px 7px;font-size:10px;line-height:1.4;white-space:nowrap;background:var(--dsw-alias-bg-multi-select);color:var(--dsw-alias-label-secondary)}
-.av-path{display:block;min-width:0;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.av-item-actions{display:flex;gap:8px;justify-content:flex-end}
-.av-empty{padding:14px 0;color:var(--dsw-alias-label-tertiary)}
+.av-hint{margin-top:14px;color:var(--dsw-alias-label-tertiary);font-size:12px}
 .av-msg{margin-top:14px;padding:10px 12px;border-left:3px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-2);white-space:pre-wrap;max-height:220px;overflow:auto;font-size:12px}
 .av-msg.ok{border-color:#28945a}
 .av-msg.err{border-color:#d23a3a}
@@ -65,25 +52,8 @@ const styles = `
   .av-actions{justify-content:flex-start;width:100%}
   .av-btn{max-width:100%;white-space:normal}
   .av-btn.cleanup{width:100%;min-width:0;min-height:48px}
-  .av-filter{width:100%}
-  .av-input{min-width:0;width:100%}
-  .av-item{grid-template-columns:1fr}
-  .av-item-actions{justify-content:flex-start}
-  .av-path{width:100%;max-width:100%}
 }
 `
-
-interface ArchiveRowView {
-  sessionId: string
-  createdAt: number
-  cwd: string | null
-  workspaceTitle: string | null
-  workspacePath: string | null
-  blank: boolean
-  preview: string
-  previewAvailable: boolean
-  archivedAt: number | null
-}
 
 interface CleanupSummaryView {
   trackedCount: number
@@ -102,27 +72,6 @@ async function fetchJson(path: string, init?: RequestInit): Promise<any> {
   return data
 }
 
-function formatTime(createdAt: number): string {
-  if (!createdAt) return '时间未知'
-  try {
-    return new Date(createdAt).toLocaleString()
-  } catch {
-    return '时间未知'
-  }
-}
-
-function previewText(row: ArchiveRowView): string {
-  if (row.blank) return '（空白会话）'
-  if (row.preview) return row.preview
-  return row.previewAvailable ? '（无文本提问）' : '（预览不可用）'
-}
-
-function archivedAgeText(archivedAt: number | null | undefined): string | null {
-  if (typeof archivedAt !== 'number' || !Number.isFinite(archivedAt)) return null
-  const days = Math.max(0, Math.floor((Date.now() - archivedAt) / (24 * 60 * 60 * 1_000)))
-  return `已归档 ${days} 天`
-}
-
 function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
   const style = el('style')
   style.textContent = styles
@@ -132,7 +81,7 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
 
   const toolbar = el('div', 'av-toolbar')
   const heading = el('div')
-  heading.append(el('h2', undefined, '归档对话'))
+  heading.append(el('h2', undefined, '归档清理'))
   const summary = el('div', 'av-summary', '正在读取归档状态…')
   heading.append(summary)
   const refreshButton = el('button', 'av-btn secondary', '刷新')
@@ -148,28 +97,19 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
   toolbar.append(heading, actions)
   page.append(toolbar)
 
-  const filter = el('div', 'av-filter')
-  const searchInput = el('input', 'av-input')
-  searchInput.type = 'search'
-  searchInput.placeholder = '搜索提问预览 / 工作区 / 路径 / 会话 id'
-  filter.append(searchInput)
-  page.append(filter)
-
-  const listView = el('ul', 'av-list')
-  page.append(listView)
+  page.append(el('div', 'av-hint', '浏览与恢复归档会话请使用内置「Archived sessions」设置页；永久删除单个会话可让 agent 调用 delete_archived_session 工具。'))
 
   const message = el('div', 'av-msg')
   message.style.display = 'none'
   page.append(message)
 
-  let rows: ArchiveRowView[] = []
+  let total = 0
   let cleanup: CleanupSummaryView = {
     trackedCount: 0,
     unknownCount: 0,
     eligible7Days: 0,
     eligible30Days: 0,
   }
-  let query = ''
   let busy = false
   let armedCleanup: 7 | 30 | null = null
   let cleanupTimer = 0
@@ -210,143 +150,12 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
     renderCleanupButtons()
   }
 
-  function renderList(): void {
-    listView.replaceChildren()
-    const needle = query.trim().toLowerCase()
-    const visible = needle === ''
-      ? rows
-      : rows.filter(row =>
-        previewText(row).toLowerCase().includes(needle)
-        || (row.workspaceTitle ?? '').toLowerCase().includes(needle)
-        || (row.workspacePath ?? '').toLowerCase().includes(needle)
-        || (row.cwd ?? '').toLowerCase().includes(needle)
-        || row.sessionId.toLowerCase().includes(needle))
+  function renderSummary(): void {
     const unknownSuffix = cleanup.unknownCount > 0 ? ` · ${cleanup.unknownCount} 个归档时间未知` : ''
-    summary.textContent = rows.length === 0
+    summary.textContent = total === 0
       ? '没有归档的会话'
-      : `共 ${rows.length} 个归档会话${needle !== '' ? `，匹配 ${visible.length} 个` : ''}${unknownSuffix} · 恢复后会话自动回到原位置`
+      : `共 ${total} 个归档会话${unknownSuffix}`
     renderCleanupButtons()
-    if (rows.length === 0) {
-      const empty = el('li', 'av-empty', '没有归档的会话。归档入口在每个会话的右键菜单里。')
-      listView.append(empty)
-      return
-    }
-    if (visible.length === 0) {
-      listView.append(el('li', 'av-empty', '没有匹配的归档会话。'))
-      return
-    }
-    for (const row of visible) {
-      const item = el('li', 'av-item')
-
-      const main = el('div')
-      const preview = el('div', `av-preview${row.blank || !row.preview ? ' muted' : ''}`, previewText(row))
-      main.append(preview)
-      const meta = el('div', 'av-meta')
-      meta.append(el('span', undefined, formatTime(row.createdAt)))
-      if (row.workspaceTitle !== null) {
-        const tag = el('span', 'av-tag', row.workspaceTitle)
-        meta.append(tag)
-      } else {
-        meta.append(el('span', 'av-tag', '未分组'))
-      }
-      const archiveAge = archivedAgeText(row.archivedAt)
-      if (archiveAge !== null) meta.append(el('span', 'av-tag', archiveAge))
-      const pathText = row.workspacePath ?? row.cwd
-      if (pathText) {
-        const path = el('span', 'av-path', pathText)
-        path.title = `${pathText}\n${row.sessionId}`
-        meta.append(path)
-      }
-      const idHint = el('span', undefined, `…${row.sessionId.slice(-8)}`)
-      idHint.title = row.sessionId
-      meta.append(idHint)
-      main.append(meta)
-      item.append(main)
-
-      const itemActions = el('div', 'av-item-actions')
-      const restoreButton = el('button', 'av-btn', '恢复')
-      restoreButton.type = 'button'
-      restoreButton.addEventListener('click', () => {
-        if (busy) return
-        setBusy(true)
-        restoreButton.disabled = true
-        restoreButton.textContent = '恢复中…'
-        const label = previewText(row)
-        fetchJson('/unarchive', { method: 'POST', body: JSON.stringify({ sessionId: row.sessionId }) })
-          .then((data: any) => {
-            if (!data?.ok) throw new Error(data?.error || '恢复失败')
-            say(`已恢复「${label}」，会话已回到左侧列表原位置。`, 'ok')
-            rows = rows.filter(candidate => candidate.sessionId !== row.sessionId)
-            renderList()
-          })
-          .catch((error: unknown) => {
-            say('恢复失败：' + String(error instanceof Error ? error.message : error), 'err')
-            restoreButton.disabled = false
-            restoreButton.textContent = '恢复'
-          })
-          .finally(() => setBusy(false))
-      })
-      itemActions.append(restoreButton)
-
-      const deleteButton = el('button', 'av-btn danger', '删除')
-      deleteButton.type = 'button'
-      let armed = false
-      let disarmTimer = 0
-      const disarm = (): void => {
-        armed = false
-        deleteButton.classList.remove('armed')
-        deleteButton.textContent = '删除'
-      }
-      deleteButton.addEventListener('click', () => {
-        if (busy) return
-        if (!armed) {
-          armed = true
-          deleteButton.classList.add('armed')
-          deleteButton.textContent = '确认删除（不可恢复）'
-          window.clearTimeout(disarmTimer)
-          disarmTimer = window.setTimeout(disarm, 5000)
-          return
-        }
-        window.clearTimeout(disarmTimer)
-        setBusy(true)
-        deleteButton.disabled = true
-        deleteButton.textContent = '删除中…'
-        const label = previewText(row)
-        fetchJson('/delete', { method: 'POST', body: JSON.stringify({ sessionId: row.sessionId }) })
-          .then(async (data: any) => {
-            if (!data?.ok) throw new Error(data?.error || '删除失败')
-            const refreshError = await reconcileDeletedSession(row.sessionId, {
-              removeRow: (sessionId) => {
-                rows = rows.filter(candidate => candidate.sessionId !== sessionId)
-                renderList()
-              },
-              refreshSessions: () => sessions.refresh(),
-            })
-            if (refreshError === null) {
-              const listError = await loadArchiveData().then(() => null, error => error)
-              if (listError === null) {
-                say(`已永久删除「${label}」及其会话日志。`, 'ok')
-              } else {
-                const detail = listError instanceof Error ? listError.message : String(listError)
-                say(`已永久删除「${label}」，但归档列表刷新失败；请刷新页面。\n${detail}`, 'err')
-              }
-            } else {
-              const detail = refreshError instanceof Error ? refreshError.message : String(refreshError)
-              say(`已永久删除「${label}」，但左侧会话列表刷新失败；请刷新页面。\n${detail}`, 'err')
-            }
-          })
-          .catch((error: unknown) => {
-            say('删除失败：' + String(error instanceof Error ? error.message : error), 'err')
-            disarm()
-            deleteButton.disabled = false
-          })
-          .finally(() => setBusy(false))
-      })
-      itemActions.append(deleteButton)
-      item.append(itemActions)
-
-      listView.append(item)
-    }
   }
 
   function bindCleanup(button: HTMLButtonElement, days: 7 | 30): void {
@@ -368,30 +177,21 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
       fetchJson('/cleanup', { method: 'POST', body: JSON.stringify({ days }) })
         .then(async (data: any) => {
           if (!data?.ok) throw new Error(data?.error || '批量清理失败')
-          const deletedIds = Array.isArray(data?.deletedSessionIds)
-            ? data.deletedSessionIds.map(String)
-            : []
-          const sessionRefreshError = await reconcileDeletedSessions(deletedIds, {
-            removeRows: (sessionIds) => {
-              const removed = new Set(sessionIds)
-              rows = rows.filter(candidate => !removed.has(candidate.sessionId))
-              renderList()
-            },
-            refreshSessions: () => sessions.refresh(),
-          })
-          const listRefreshError = await loadArchiveData().then(() => null, error => error)
+          const deletedCount = Number(data?.deletedCount ?? 0)
           const failedCount = Number(data?.failedCount ?? 0)
+          const sessionRefreshError = await sessions.refresh().then(() => null, (error: unknown) => error)
+          const summaryRefreshError = await loadSummary().then(() => null, (error: unknown) => error)
           if (failedCount > 0) {
             const details = Array.isArray(data?.failures)
               ? data.failures.map((failure: any) => `${String(failure.sessionId)}：${String(failure.error)}`).join('\n')
               : ''
-            say(`已删除 ${deletedIds.length} 个，失败 ${failedCount} 个。${details === '' ? '' : `\n${details}`}`, 'err')
-          } else if (sessionRefreshError !== null || listRefreshError !== null) {
-            const reason = sessionRefreshError ?? listRefreshError
+            say(`已删除 ${deletedCount} 个，失败 ${failedCount} 个。${details === '' ? '' : `\n${details}`}`, 'err')
+          } else if (sessionRefreshError !== null || summaryRefreshError !== null) {
+            const reason = sessionRefreshError ?? summaryRefreshError
             const detail = reason instanceof Error ? reason.message : String(reason)
-            say(`已删除 ${deletedIds.length} 个，但列表刷新失败；请刷新页面。\n${detail}`, 'err')
+            say(`已删除 ${deletedCount} 个，但界面刷新失败；请刷新页面。\n${detail}`, 'err')
           } else {
-            say(`已永久删除 ${deletedIds.length} 个归档超过 ${days} 天的对话。`, 'ok')
+            say(`已永久删除 ${deletedCount} 个归档超过 ${days} 天的对话。`, 'ok')
           }
         })
         .catch((error: unknown) => {
@@ -401,18 +201,18 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
     })
   }
 
-  function loadArchiveData(): Promise<void> {
-    return fetchJson('/list').then((data: any) => {
+  function loadSummary(): Promise<void> {
+    return fetchJson('/summary').then((data: any) => {
       if (!data?.ok) throw new Error(data?.error || '归档状态读取失败')
-      rows = Array.isArray(data?.sessions) ? data.sessions : []
+      total = Number(data?.count ?? 0)
       cleanup = data?.cleanup ?? cleanup
-      renderList()
+      renderSummary()
     })
   }
 
   function refresh(): Promise<void> {
     setBusy(true)
-    return loadArchiveData()
+    return loadSummary()
       .then(() => {
         if (message.className.endsWith('err')) say('', 'ok')
       })
@@ -423,10 +223,6 @@ function buildPanel(sessions: ClientContext['sessions']): HTMLElement {
       .finally(() => setBusy(false))
   }
 
-  searchInput.addEventListener('input', () => {
-    query = searchInput.value
-    renderList()
-  })
   refreshButton.addEventListener('click', () => { void refresh() })
   bindCleanup(cleanup7Button, 7)
   bindCleanup(cleanup30Button, 30)
@@ -455,7 +251,7 @@ export function apply(ctx: ClientContext): void {
       name: 'settings.section',
       id: 'archive-vault',
       order: 61,
-      label: () => '归档对话',
+      label: () => '归档清理',
     }, createArchiveVaultPanel(ctx.sessions)),
   ), 'dsh-archive-vault: panel')
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-archive-vault",
-  "version": "0.2.4",
-  "description": "dsh 插件：在设置面板中查看、恢复与永久删除归档会话",
+  "version": "0.3.0",
+  "description": "dsh 插件：归档会话的永久删除与按归档时长批量清理（浏览/恢复交给内置设置页），附归档 agent 工具",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
