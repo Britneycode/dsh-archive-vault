@@ -1,7 +1,7 @@
 {
-  "name": "dsh-archive-vault",
-  "version": "0.3.0",
-  "description": "dsh 插件：归档会话的永久删除与按归档时长批量清理（浏览/恢复交给内置设置页），附归档 agent 工具",
+  "name": "dsh-archive-vault-desktop",
+  "version": "0.1.0",
+  "description": "dsh-archive-vault 的桌面端（DeepSeek Harness Desktop）适配版：设置页面板走桌面端设计系统并随宿主主题变化，宿主半边沿用上游构建",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -12,17 +12,15 @@
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Britneycode/dsh-archive-vault.git"
+    "url": "git+https://github.com/Britneycode/dsh-archive-vault-desktop.git"
   },
-  "bugs": {
-    "url": "https://github.com/Britneycode/dsh-archive-vault/issues"
-  },
-  "homepage": "https://github.com/Britneycode/dsh-archive-vault#readme",
+  "homepage": "https://github.com/Britneycode/dsh-archive-vault-desktop#readme",
   "keywords": [
     "dsh-plugin",
     "dsh",
     "deepseek-harness",
-    "archive"
+    "archive",
+    "desktop"
   ],
   "peerDependencies": {
     "@deepseek-ai/dsh-llm": ">=0.0.1-rc <2",
@@ -33,14 +31,20 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@deepseek-ai/dsh-tools": "link:tests/stubs/dsh-tools",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-test-renderer": "^18.3.1",
+    "schemastery": "^3.18.0",
     "typescript": "^5.9.0",
     "tsdown": "^0.22.14"
   },
   "scripts": {
-    "build": "node scripts/build.mjs --all",
-    "typecheck": "node scripts/build.mjs --typecheck",
-    "build:client": "node scripts/build.mjs --client",
-    "test": "node --test tests/archive-vault.test.mjs"
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.client.json --noEmit",
+    "test": "node --test \"tests/**/*.test.mjs\""
   },
   "exports": {
     ".": {
@@ -60,6 +64,9 @@
       "inject": [
         "@deepseek-ai/dsh-client-modules",
         "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     }

@@ -2,3 +2,4 @@ node_modules/
 .mimosa/
 *.tsbuildinfo
 .DS_Store
+.npmrc

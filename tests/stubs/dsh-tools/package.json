@@ -1,0 +1,7 @@
+{
+  "name": "@deepseek-ai/dsh-tools",
+  "version": "0.0.0-stub",
+  "description": "本地测试替身：只满足 lib/index.js 的模块解析与 defineTool 导出，行为由真实宿主提供",
+  "type": "module",
+  "main": "./index.js"
+}
