@@ -5,8 +5,9 @@
 面板，让它和桌面端设置界面同一套设计系统——并且**跟着桌面端一起变**。
 
 - **设置页 → 归档清理**（导航项 `archived-sessions`）：显示归档会话数量与归档时间
-  跟踪状态，「清理 7 天以上」「清理 30 天以上」按实际归档时间批量永久删除。单项失败
-  不中止其余清理，完成后分别报告成功数与失败数；
+  跟踪状态，「清理 7 天以上」「清理 30 天以上」按实际归档时间批量永久删除，「清理
+  全部归档」连归档时间未知的历史归档一起清空。单项失败不中止其余清理，完成后分别
+  报告成功数与失败数；
 - **永久删除**：清除归档记录、工作区记账并删除磁盘上的会话日志；正在运行的会话会被拒绝；
 - **agent 工具**：`list_archived_sessions` / `unarchive_session` /
   `delete_archived_session`，在会话里也能直接找回或清理旧对话。
@@ -94,7 +95,9 @@ DSH_DESKTOP_ROOT="D:/App/deepseek harness" npm test
   `detachSession` 清工作区记账 → 删 `persistence.locate()` 定位到的会话目录
   （目录名不含会话 id 时拒绝删文件），全程幂等；
 - 归档时间：只从插件启用后发生的新归档开始记录，历史归档显示为「归档时间未知」，
-  不进入批量清理范围；状态文件 `$DSH_HOME/archive-vault/archive-times.json`
+  不进入「清理 N 天以上」的候选范围（避免用错误时间误删）；要清掉它们只有显式的
+  「清理全部归档」——该模式不看时间，直接把归档集合里的会话全部删除。状态文件
+  `$DSH_HOME/archive-vault/archive-times.json`
   （默认 `~/.dsh/archive-vault/archive-times.json`），版本化 JSON + 原子替换，
   读取异常时批量清理失败关闭。
 

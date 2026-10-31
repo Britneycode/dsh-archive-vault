@@ -98,7 +98,7 @@ function createSection(sessions: ClientContext['sessions']): () => ReactNode {
     const [summary, setSummary] = useState<Summary | null>(null)
     const [busy, setBusy] = useState(false)
     const [detail, setDetail] = useState('')
-    const [pending, setPending] = useState<7 | 30 | null>(null)
+    const [pending, setPending] = useState<7 | 30 | 'all' | null>(null)
     const [acknowledged, setAcknowledged] = useState(false)
     const [toast, setToast] = useState<{ key: number; text: string; tone?: 'success' } | null>(null)
 
@@ -126,12 +126,12 @@ function createSection(sessions: ClientContext['sessions']): () => ReactNode {
 
     useEffect(() => { refresh() }, [refresh])
 
-    const confirm = useCallback((days: 7 | 30): void => { void (async (): Promise<void> => {
+    const confirm = useCallback((scope: 7 | 30 | 'all'): void => { void (async (): Promise<void> => {
       setPending(null)
       setAcknowledged(false)
       setBusy(true)
       try {
-        const data = await fetchJson('/cleanup', { method: 'POST', body: JSON.stringify({ days }) })
+        const data = await fetchJson('/cleanup', { method: 'POST', body: JSON.stringify({ days: scope }) })
         if (!data?.ok) throw new Error(data?.error || '批量清理失败')
         const deleted = Number(data?.deletedCount ?? 0)
         const failures: Failure[] = Array.isArray(data?.failures) ? data.failures : []
@@ -145,7 +145,13 @@ function createSection(sessions: ClientContext['sessions']): () => ReactNode {
           setToast({ key: Date.now(), text: `已永久删除 ${deleted} 个，但界面刷新失败；请刷新页面` })
         } else {
           setDetail('')
-          setToast({ key: Date.now(), text: `已永久删除 ${deleted} 个归档超过 ${days} 天的对话`, tone: 'success' })
+          setToast({
+            key: Date.now(),
+            text: scope === 'all'
+              ? `已永久删除全部 ${deleted} 个归档对话`
+              : `已永久删除 ${deleted} 个归档超过 ${scope} 天的对话`,
+            tone: 'success',
+          })
         }
       } catch (error) {
         setDetail(`批量清理失败：${reason(error)}`)
@@ -163,26 +169,29 @@ function createSection(sessions: ClientContext['sessions']): () => ReactNode {
         ? '没有归档的会话'
         : `共 ${summary.count} 个归档会话${summary.unknownCount > 0 ? ` · ${summary.unknownCount} 个归档时间未知` : ''}`
 
-    const cleanupRows = ([7, 30] as const).map((days) => {
-      const total = count(days)
+    const cleanupRows = ([7, 30, 'all'] as const).map((scope) => {
+      const total = scope === 'all' ? summary?.count ?? 0 : count(scope)
+      const unknown = summary?.unknownCount ?? 0
+      const title = scope === 'all' ? '清理全部归档' : `清理 ${scope} 天以上`
+      const desc = total === 0
+        ? (scope === 'all' ? '没有归档的会话' : `没有归档满 ${scope} 天的会话`)
+        : scope === 'all'
+          ? `全部 ${total} 个归档会话${unknown > 0 ? `（含 ${unknown} 个归档时间未知）` : ''}，可永久删除`
+          : `${total} 个会话已归档满 ${scope} 天，可永久删除`
       return (
-        <div className="avd-row" key={days}>
+        <div className="avd-row" key={scope}>
           <div className="avd-row-text">
-            <div className="avd-row-title">{`清理 ${days} 天以上`}</div>
-            <div className="avd-row-desc">
-              {total === 0
-                ? `没有归档满 ${days} 天的会话`
-                : `${total} 个会话已归档满 ${days} 天，可永久删除`}
-            </div>
+            <div className="avd-row-title">{title}</div>
+            <div className="avd-row-desc">{desc}</div>
           </div>
           <div className="avd-row-action">
             <Button
               variant="outline"
               icon={<IconTrashOutlineRegular size={16} />}
               disabled={busy || total === 0}
-              onClick={() => { setAcknowledged(false); setPending(days) }}
+              onClick={() => { setAcknowledged(false); setPending(scope) }}
             >
-              {total === 0 ? '删除' : `删除 ${total} 个`}
+              {total === 0 ? '删除' : scope === 'all' ? `全部删除 ${total} 个` : `删除 ${total} 个`}
             </Button>
           </div>
         </div>
@@ -225,7 +234,9 @@ function createSection(sessions: ClientContext['sessions']): () => ReactNode {
         <RiskConfirmation
           open={pending !== null}
           title="永久删除归档会话"
-          description={`将永久删除 ${pending === null ? 0 : count(pending)} 个归档超过 ${pending ?? 0} 天的对话：`
+          description={(pending === 'all'
+            ? `将永久删除全部 ${summary?.count ?? 0} 个归档对话（含归档时间未知的历史归档）：`
+            : `将永久删除 ${pending === null ? 0 : count(pending)} 个归档超过 ${pending ?? 0} 天的对话：`)
             + '清除归档记录、工作区记账，并删除磁盘上的会话日志。此操作不可恢复；正在运行的会话会被拒绝。'}
           acknowledgeLabel="我了解这些对话将无法恢复"
           cancelLabel="取消"

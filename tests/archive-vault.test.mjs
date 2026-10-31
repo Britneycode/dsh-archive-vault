@@ -463,11 +463,54 @@ test('HTTP API：按真实归档时间批量清理 7 天候选', async () => {
   }
 })
 
+test('HTTP API：days=all 清空全部归档，含归档时间未知的历史归档', async () => {
+  const day = 24 * 60 * 60 * 1_000
+  const now = 40 * day
+  const base = mkdtempSync(join(tmpdir(), 'archive-vault-cleanup-all-'))
+  const ids = ['legacy', 'recent']
+  try {
+    for (const id of ids) {
+      const sessionDir = join(base, id)
+      mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(join(sessionDir, 'session.jsonl.zstd'), 'x')
+    }
+    const { handler, registry } = await setupApi(ids, {
+      locateBase: base.replaceAll('\\', '/'),
+      now,
+      // legacy 没有时间记录 → 任何按天数的阈值都选不到它。
+      archivedAt: { recent: now - 1 * day },
+    })
+
+    const res = fakeRes()
+    await handler(
+      fakeReq('POST', '/archive-vault/api/cleanup', JSON.stringify({ days: 'all' }), {
+        origin: 'http://localhost:3080',
+        host: 'localhost:3080',
+      }),
+      res,
+    )
+    assert.deepEqual(JSON.parse(res.body), {
+      ok: true,
+      days: 'all',
+      eligibleCount: 2,
+      deletedCount: 2,
+      deletedSessionIds: ['legacy', 'recent'],
+      failedCount: 0,
+      failures: [],
+    })
+    assert.deepEqual(registry.archivedSessionIds, [])
+    assert.equal(existsSync(join(base, 'legacy')), false)
+    assert.equal(existsSync(join(base, 'recent')), false)
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
 test('HTTP API：批量清理拒绝 7 和 30 以外的阈值', async () => {
   const { handler } = await setupApi([])
   const res = fakeRes()
   await handler(fakeReq('POST', '/archive-vault/api/cleanup', JSON.stringify({ days: 14 })), res)
-  assert.deepEqual(JSON.parse(res.body), { ok: false, error: 'days must be 7 or 30' })
+  assert.deepEqual(JSON.parse(res.body), { ok: false, error: 'days must be 7, 30 or all' })
 })
 
 test('HTTP API：并发批量清理串行重算候选，不重复删除', async () => {

@@ -286,3 +286,66 @@ test('二次确认后 POST /cleanup 并刷新会话列表与摘要', async () =>
     globalThis.fetch = originalFetch
   }
 })
+
+test('「全部删除」按钮在归档时间未知时仍可用，并提交 days=all', async () => {
+  const primitives = hostPrimitivesStub()
+  const slots = slotsStub()
+  const calls = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (path, init) => {
+    calls.push({ path: String(path), init })
+    if (String(path).endsWith('/summary')) {
+      // 3 个归档全都没有时间记录：按天数清理的候选都是 0。
+      return {
+        ok: true,
+        json: async () => ({ ok: true, count: 3, cleanup: { trackedCount: 0, unknownCount: 3, eligible7Days: 0, eligible30Days: 0 } }),
+      }
+    }
+    if (String(path).endsWith('/cleanup')) {
+      return { ok: true, json: async () => ({ ok: true, deletedCount: 3, failures: [] }) }
+    }
+    return { ok: false, status: 404, json: async () => ({ ok: false, error: 'not found' }) }
+  }
+  try {
+    const exports = await loadBundle({
+      '@deepseek-ai/dsh-client-ui-primitives': primitives.module,
+    })
+    exports.apply({ effect: cb => cb(), slots: slots.slots, sessions: { refresh: async () => {} } })
+    const { component } = slots.entries[0]
+    let renderer
+    await act(async () => { renderer = createRenderer(createElement(component)) })
+    for (let i = 0; i < 6; i++) {
+      await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
+    }
+
+    const buttonProps = (node, acc = []) => {
+      if (node === null) return acc
+      if (node.props?.['data-host-primitive'] === 'Button') acc.push(node)
+      for (const child of node.children ?? []) {
+        if (typeof child === 'object') buttonProps(child, acc)
+      }
+      return acc
+    }
+    const buttons = buttonProps(renderer.toJSON())
+    const allButton = buttons.find(node => JSON.stringify(node).includes('全部删除 3 个'))
+    assert.ok(allButton !== undefined, '找不到「全部删除」按钮')
+    assert.notEqual(allButton.props.disabled, true, '归档时间未知时「全部删除」必须可点')
+
+    await act(async () => { allButton.props.onClick() })
+    const confirmation = primitives.seen.riskConfirmation.at(-1)
+    assert.ok(confirmation?.open === true, '全部删除也必须先打开 RiskConfirmation')
+    assert.ok(confirmation.description.includes('3 个'), '确认框应写明全部数量')
+
+    await act(async () => { confirmation.onAcknowledgedChange(true) })
+    await act(async () => { confirmation.onConfirm() })
+    for (let i = 0; i < 6; i++) {
+      await act(async () => { await new Promise(resolve => setImmediate(resolve)) })
+    }
+    const post = calls.find(c => c.init?.method === 'POST')
+    assert.ok(post !== undefined, '确认后没有 POST /cleanup')
+    assert.deepEqual(JSON.parse(post.init.body), { days: 'all' })
+    await act(async () => { renderer.unmount() })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

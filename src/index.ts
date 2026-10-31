@@ -314,6 +314,8 @@ export interface DeleteDeps {
   isLive: (sessionId: string) => boolean
   /** 删除会话目录（生产为 fs rm recursive；测试注入捕获路径）。 */
   removeArtifact: (sessionDir: string) => Promise<void>
+  /** 删除完成后补发 `api-session/removed`（宿主只在 session/disposed 时发，归档会话走不到）。 */
+  onRemoved?: (sessionId: string) => void
 }
 
 /** 删除结果：registry 引用总是清理；artifactDeleted 说明日志目录是否真的删了。 */
@@ -369,7 +371,19 @@ export async function deleteArchivedSession(deps: DeleteDeps, sessionId: string)
     await (workspace as any).detachSession(target)
   }
 
+  // 宿主只在 session/disposed 时发 api-session/removed（会话永不删除，走不到那里），
+  // 所以删完必须补发同一事件：前端据此丢掉侧栏失效行并重新拉列表，否则那一行
+  // 会一直挂到重连/重启。通知失败不影响已完成的删除。
+  const notifyRemoved = (): void => {
+    try {
+      deps.onRemoved?.(target)
+    } catch {
+      // 通知失败不影响已完成的删除
+    }
+  }
+
   if (header === undefined) {
+    notifyRemoved()
     return { sessionId: target, artifactDeleted: false, artifactPath: null }
   }
   const location = deps.persistence.locate?.(header as never) as { path?: string } | undefined
@@ -384,6 +398,7 @@ export async function deleteArchivedSession(deps: DeleteDeps, sessionId: string)
     )
   }
   await deps.removeArtifact(sessionDir)
+  notifyRemoved()
   return { sessionId: target, artifactDeleted: true, artifactPath: sessionDir }
 }
 
@@ -460,17 +475,25 @@ export function apply(ctx: AppContext, config: Config, runtime: ApplyRuntime = {
         if (req.method === 'POST' && path === '/cleanup') {
           if (!sameOrigin(req)) return send(403, { ok: false, error: 'forbidden' })
           const body = JSON.parse(await readBody(req))
-          const days = Number(body?.days)
-          if (days !== 7 && days !== 30) return send(200, { ok: false, error: 'days must be 7 or 30' })
+          const scope = body?.days
+          // 'all' = 清空全部归档（含归档时间未知的历史归档），其余按天数筛选。
+          const all = scope === 'all'
+          const days = Number(scope)
+          if (!all && days !== 7 && days !== 30) {
+            return send(200, { ok: false, error: 'days must be 7, 30 or all' })
+          }
           const { eligible, result } = await enqueueDeletion(async () => {
             const archivedAt = await archiveTimeTracker.snapshot()
             const archivedIds = (ctx.workspaceRegistry.archivedSessionIds as readonly unknown[]).map(String)
-            const eligible = eligibleArchivedSessionIds(archivedIds, archivedAt, days, now())
+            const eligible = all
+              ? [...archivedIds]
+              : eligibleArchivedSessionIds(archivedIds, archivedAt, days, now())
             const liveSessions: any = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
             const result = await cleanupArchivedSessions(eligible, sessionId => deleteArchivedSession({
               registry: ctx.workspaceRegistry,
               persistence: ctx.sessionPersistence,
               isLive: id => liveSessions?.get?.(id) !== undefined,
+              onRemoved: id => (ctx as any).emit?.('api-session/removed', id),
               removeArtifact: dir => rm(dir, { recursive: true, force: false }),
             }, sessionId))
             await archiveTimeTracker.observe(
@@ -481,13 +504,13 @@ export function apply(ctx: AppContext, config: Config, runtime: ApplyRuntime = {
           logger?.info?.(
             '[%s] 清理归档超过 %s 天的会话：成功 %s，失败 %s',
             name,
-            days,
+            all ? '全部' : days,
             result.deletedSessionIds.length,
             result.failures.length,
           )
           return send(200, {
             ok: true,
-            days,
+            days: all ? 'all' : days,
             eligibleCount: eligible.length,
             deletedCount: result.deletedSessionIds.length,
             deletedSessionIds: result.deletedSessionIds,
@@ -575,6 +598,7 @@ export function apply(ctx: AppContext, config: Config, runtime: ApplyRuntime = {
         registry: ctx.workspaceRegistry,
         persistence: ctx.sessionPersistence,
         isLive: id => sessions?.get?.(id) !== undefined,
+        onRemoved: id => (ctx as any).emit?.('api-session/removed', id),
         removeArtifact: dir => rm(dir, { recursive: true, force: false }),
       }, sessionId))
       return result.artifactDeleted

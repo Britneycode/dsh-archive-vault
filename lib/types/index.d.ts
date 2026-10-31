@@ -89,6 +89,8 @@ export interface DeleteDeps {
     isLive: (sessionId: string) => boolean;
     /** 删除会话目录（生产为 fs rm recursive；测试注入捕获路径）。 */
     removeArtifact: (sessionDir: string) => Promise<void>;
+    /** 删除完成后补发 `api-session/removed`（宿主只在 session/disposed 时发，归档会话走不到）。 */
+    onRemoved?: (sessionId: string) => void;
 }
 /** 删除结果：registry 引用总是清理；artifactDeleted 说明日志目录是否真的删了。 */
 export interface DeleteResult {
