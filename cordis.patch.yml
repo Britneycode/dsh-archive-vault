@@ -1,5 +1,5 @@
-# dsh-archive-vault-desktop bundle patch: mounts the host plugin into a profile.
+# dsh-archive-vault bundle patch: mounts the host plugin into a profile.
 # `dsh plugin --profile desktop add` writes the same row.
 - insert:
     - id: archive-vault-desktop
-      name: 'dsh-archive-vault-desktop'
+      name: 'dsh-archive-vault'

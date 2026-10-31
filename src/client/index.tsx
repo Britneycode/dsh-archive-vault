@@ -1,5 +1,5 @@
 /**
- * dsh-archive-vault-desktop — 设置页「归档清理」面板（桌面端）。
+ * dsh-archive-vault — 设置页「归档清理」面板（桌面端）。
  *
  * 与 dsh 桌面端 UI 保持一致的做法：
  *
@@ -38,7 +38,7 @@ type ClientContext = {
 export const inject = ['sessions', 'slots']
 
 const API = '/archive-vault/api'
-const PLUGIN_ID = 'dsh-archive-vault-desktop'
+const PLUGIN_ID = 'dsh-archive-vault'
 
 /** 面板样式：只在宿主文档里挂一次，跟随插件生命周期被 HMR 回收。 */
 const css = `

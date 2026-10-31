@@ -1,4 +1,4 @@
-# dsh-archive-vault-desktop 归档清理（桌面端）
+# dsh-archive-vault 归档清理（桌面端）
 
 在 [dsh-archive-vault](https://github.com/Britneycode/dsh-archive-vault) 的基础上做的
 **桌面端（DeepSeek Harness Desktop）** 版本：功能与宿主契约完全沿用上游，只重写设置页
@@ -39,12 +39,12 @@
 
 ## 安装（桌面端 profile）
 
-本包现居 `~/.dsh/plugins/dsh-archive-vault-desktop`（安装目录之外，应用更新不会
+本包现居 `~/.dsh/plugins/dsh-archive-vault`（安装目录之外，应用更新不会
 覆盖）。用官方 CLI 安装/重装，它会自动完成 pnpm 安装与 `dsh.profile.bundles` 对账：
 
 ```bash
-dsh plugin --profile desktop add "C:/Users/<你>/.dsh/plugins/dsh-archive-vault-desktop"
-dsh plugin --profile desktop remove dsh-archive-vault-desktop   # 卸载
+dsh plugin --profile desktop add "C:/Users/<你>/.dsh/plugins/dsh-archive-vault"
+dsh plugin --profile desktop remove dsh-archive-vault   # 卸载
 ```
 
 装完**重启桌面端**：profile 的 bundle 列表在启动时读取。

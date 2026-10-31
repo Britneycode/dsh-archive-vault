@@ -526,6 +526,33 @@ test('deleteArchivedSession：live 会话拒绝且不产生任何变更', async 
   assert.deepEqual(removed, [])
 })
 
+test('deleteArchivedSession：删完补发会话移除事件（live 拒绝时不发）', async () => {
+  const registry = fakeRegistry({ archived: ['session-a'] })
+  const persistence = fakePersistence({ headers: [{ id: 'session-a', createdAt: 1 }] })
+  const notified = []
+  await deleteArchivedSession({
+    registry,
+    persistence,
+    isLive: () => false,
+    removeArtifact: async () => {},
+    onRemoved: id => notified.push(id),
+  }, 'session-a')
+  assert.deepEqual(notified, ['session-a'])
+
+  const rejected = []
+  await assert.rejects(
+    deleteArchivedSession({
+      registry: fakeRegistry({ archived: ['session-b'] }),
+      persistence: fakePersistence({ headers: [{ id: 'session-b', createdAt: 1 }] }),
+      isLive: () => true,
+      removeArtifact: async () => {},
+      onRemoved: id => rejected.push(id),
+    }, 'session-b'),
+    /正在运行/,
+  )
+  assert.deepEqual(rejected, [])
+})
+
 test('deleteArchivedSession：清归档集、detach 记账、删会话目录', async () => {
   const ws = workspaceEntity({ id: 'ws-1', title: 'Demo', path: 'D:/Demo', sessionIds: ['session-a', 'session-b'] })
   const registry = fakeRegistry({ archived: ['session-a'], workspaces: [ws] })

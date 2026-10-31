@@ -1,6 +1,6 @@
 import type { UserConfig } from 'tsdown'
 
-const PLUGIN_ID = 'dsh-archive-vault-desktop'
+const PLUGIN_ID = 'dsh-archive-vault'
 
 /**
  * 浏览器半边只允许 require 宿主 shell 的基线模块表（PLATFORM_MODULES）里的

@@ -1,5 +1,5 @@
 {
-  "name": "dsh-archive-vault-desktop",
+  "name": "dsh-archive-vault",
   "version": "0.1.0",
   "description": "dsh-archive-vault 的桌面端（DeepSeek Harness Desktop）适配版：设置页面板走桌面端设计系统并随宿主主题变化，宿主半边沿用上游构建",
   "type": "module",
@@ -12,9 +12,9 @@
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Britneycode/dsh-archive-vault-desktop.git"
+    "url": "git+https://github.com/Britneycode/dsh-archive-vault.git"
   },
-  "homepage": "https://github.com/Britneycode/dsh-archive-vault-desktop#readme",
+  "homepage": "https://github.com/Britneycode/dsh-archive-vault#readme",
   "keywords": [
     "dsh-plugin",
     "dsh",
